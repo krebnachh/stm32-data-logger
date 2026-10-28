@@ -24,6 +24,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
+#include <time.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -47,6 +49,8 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
+I2C_HandleTypeDef hi2c1;
+
 TIM_HandleTypeDef htim6;
 
 UART_HandleTypeDef huart2;
@@ -61,6 +65,7 @@ static void MX_GPIO_Init(void);
 static void MX_TIM6_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -106,6 +111,7 @@ int main(void)
   MX_TIM6_Init();
   MX_ADC1_Init();
   MX_USART2_UART_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
   // raw data at 30 and 110 degrees
@@ -118,26 +124,74 @@ int main(void)
   	 uint16_t ts_cal1 = *(__IO uint16_t *)TS_CAL1, raw;
   	 uint16_t ts_cal2 = *(__IO uint16_t *)TS_CAL2;
 
-  	 float temp, slope;
+  	 float temp, slope, hum, pres;
   	 slope = (110.f - 30.f) / (float) (ts_cal2 - ts_cal1); // c/adc_value
   	 char temp_s[50];
+
+  	 srand((unsigned) time(NULL));
+
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+  uint16_t a = 0;
+  char b[20];
+  const uint8_t c[] = "-";
+
+  while(a < 127)
+  {
+	  if (HAL_I2C_IsDeviceReady(&hi2c1, a << 1, 1, 1000) == HAL_OK){
+		  sprintf(b, "\ndevadd : %#x\n", a);
+		  HAL_UART_Transmit(&huart2, b, 16, 1000);
+		  break;
+	  } else {
+		  HAL_UART_Transmit(&huart2, c, 1, 1000);
+	  }
+	  a++;
+	  HAL_Delay(10);
+  }
+
+  uint8_t sensortype[1];
+  uint8_t s[25];
+  uint8_t ss[20] = {0};
+  uint8_t bme280 = 96;
+  uint8_t bmp280 = 88;
+
+  HAL_I2C_Mem_Read(&hi2c1, 0x76 << 1, 0xD0, I2C_MEMADD_SIZE_8BIT, sensortype, 1, 1000);
+
+  if (memcmp(sensortype, &bme280, sizeof(*sensortype)) == 0){
+	  snprintf((char *)s,25 ,"Your chip is BME280!\n");
+  } else if (memcmp(sensortype, &bmp280, sizeof(*sensortype)) == 0){
+	  snprintf((char *)s,25,"Your chip is BMP280!\n");
+  } else {
+	  snprintf((char *)s,25, "Unknown chip id!\n");
+  }
+
+  sprintf((char *)ss, "chip id : %#x\n", *sensortype);
+  HAL_UART_Transmit(&huart2, ss, strlen((char *)ss), 1000);
+  HAL_UART_Transmit(&huart2, s, strlen((char *)s), 1000);
+
+
   while (1)
   {
-	  if (tick == 1){
+	  if (tick == 2){
 		  tick = 0;
 		  HAL_ADC_Start(&hadc1);
 		  HAL_ADC_PollForConversion(&hadc1, 1000);
 		  raw = HAL_ADC_GetValue(&hadc1);
 		  temp = slope * ((float) raw - ts_cal1) + 30.f;
-		  sprintf(temp_s, "temp : %.2f\n", temp);
+		  hum = rand() % 20;
+		  pres = rand() % 40;
+		  sprintf(temp_s, "temp=%.2f,hum=%.2f,pres=%.2f\n", temp,hum,pres);
 		  HAL_UART_Transmit(&huart2, (uint8_t *) temp_s, strlen(temp_s), 1000);
 		  HAL_ADC_Stop(&hadc1);
+
+
 	  }
+
+
 
     /* USER CODE END WHILE */
 
@@ -159,9 +213,10 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
@@ -184,9 +239,11 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART2|RCC_PERIPHCLK_ADC12;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART2|RCC_PERIPHCLK_I2C1
+                              |RCC_PERIPHCLK_ADC12;
   PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
   PeriphClkInit.Adc12ClockSelection = RCC_ADC12PLLCLK_DIV1;
+  PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_HSI;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -256,6 +313,54 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x00201D2B;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
 
 }
 
@@ -347,6 +452,7 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);

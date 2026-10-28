@@ -3,3 +3,11 @@ Release/
 *.o
 *.elf
 *.su
+*.swp
+*.swo
+*.swn
+.*.sw?
+*.log
+*.pyc
+*.venv/
+
